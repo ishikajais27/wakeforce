@@ -1,26 +1,53 @@
 'use client'
 
-import { useRef } from 'react'
+import { useRef, useEffect } from 'react'
 import { usePoseDetection } from '@/hooks/usePoseDetection'
+import { postureColor, postureLabel } from '@/lib/poseUtils'
 
 interface Props {
   active: boolean
   targetReps: number
   onComplete: () => void
+  onPostureScore?: (score: number) => void
 }
 
-export default function CameraView({ active, targetReps, onComplete }: Props) {
+export default function CameraView({
+  active,
+  targetReps,
+  onComplete,
+  onPostureScore,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const innerRef = useRef<HTMLDivElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null) // NEW
 
-  const { squat, error, stage } = usePoseDetection({
+  const { squat, postureScore, error, stage } = usePoseDetection({
     videoRef,
     canvasRef,
+    innerRef,
     active,
     targetReps,
     onComplete,
+    onPostureScore,
   })
 
+  // NEW: once video metadata is known, resize the container to match exactly
+  // so there are zero black bars regardless of landscape / portrait / any camera
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const sync = () => {
+      if (!video.videoWidth || !wrapRef.current) return
+      // Set aspect-ratio so CSS handles the sizing; height drives width
+      wrapRef.current.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`
+    }
+    video.addEventListener('loadedmetadata', sync)
+    if (video.readyState >= 1) sync() // already loaded
+    return () => video.removeEventListener('loadedmetadata', sync)
+  }, [active])
+
+  const isPostureMode = targetReps === 0
   const phaseLabel =
     squat.phase === 'calibrating'
       ? 'Hold still…'
@@ -29,7 +56,7 @@ export default function CameraView({ active, targetReps, onComplete }: Props) {
         : '⬆ Squat down'
 
   return (
-    <div className="camera-wrap">
+    <div ref={wrapRef} className="camera-wrap">
       {error ? (
         <div className="camera-error">
           <p>🚫 {error}</p>
@@ -37,10 +64,10 @@ export default function CameraView({ active, targetReps, onComplete }: Props) {
         </div>
       ) : (
         <>
-          {/* No hardcoded width/height — canvas resolution is set in JS to
-              match the camera's real resolution; CSS handles display size */}
-          <video ref={videoRef} className="camera-feed" playsInline muted />
-          <canvas ref={canvasRef} className="camera-canvas" />
+          <div ref={innerRef} className="camera-inner">
+            <video ref={videoRef} className="camera-feed" playsInline muted />
+            <canvas ref={canvasRef} className="camera-canvas" />
+          </div>
 
           {stage !== 'tracking' && (
             <div className="camera-loading">
@@ -54,10 +81,22 @@ export default function CameraView({ active, targetReps, onComplete }: Props) {
 
           {stage === 'tracking' && (
             <>
-              <div className="camera-badge">
-                {squat.repCount}/{targetReps}&nbsp;{phaseLabel}
-              </div>
-              {squat.mode === 'vertical' && (
+              {isPostureMode ? (
+                <div
+                  className="camera-badge"
+                  style={{
+                    color: postureColor(postureScore),
+                    borderColor: postureColor(postureScore),
+                  }}
+                >
+                  {postureScore}/100 — {postureLabel(postureScore)}
+                </div>
+              ) : (
+                <div className="camera-badge">
+                  {squat.repCount}/{targetReps}&nbsp;{phaseLabel}
+                </div>
+              )}
+              {!isPostureMode && squat.mode === 'vertical' && (
                 <div className="camera-tip">
                   Tracking via body movement — legs not in frame
                 </div>

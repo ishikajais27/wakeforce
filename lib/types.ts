@@ -1,19 +1,22 @@
+export type TaskType = 'squats' | 'math' | 'shake' | 'posture'
 export type RepeatMode = 'none' | 'daily' | 'weekdays' | 'weekends' | 'custom'
-
-export type TaskType = 'squats' | 'math' | 'shake'
 
 export interface Alarm {
   id: string
-  time: string // "HH:MM" 24h
+  time: string
   label: string
   enabled: boolean
   repeat: RepeatMode
-  customDays?: number[] // 0=Sun … 6=Sat
+  customDays: number[]
   task: TaskType
-  sound: string // filename in /sounds/
-  volume: number // 0–1
-  snoozeLimit: number // max snoozes allowed
-  snoozeCount: number // used snoozes this cycle
+  /** Preset name (alarm-gentle / alarm-digital / alarm-loud / alarm-chime)
+   *  or 'custom:<filename>' for user-uploaded audio (stored in memory). */
+  sound: string
+  volume: number
+  snoozeLimit: number
+  snoozeCount: number
+  /** How many minutes to snooze — user-configurable, default 5 */
+  snoozeDuration: number
 }
 
 export interface AlarmContextValue {

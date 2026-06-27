@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAlarms } from '@/context/AlarmContext'
 import { Alarm, RepeatMode, TaskType } from '@/lib/types'
 import { DAY_NAMES } from '@/lib/alarmUtils'
+import { registerCustomSound } from '@/lib/alarmSound'
 
 const TASKS: { value: TaskType; label: string; icon: string; desc: string }[] =
   [
@@ -24,11 +25,23 @@ const TASKS: { value: TaskType; label: string; icon: string; desc: string }[] =
       value: 'shake',
       label: 'Shake phone',
       icon: '📳',
-      desc: 'Shake device vigorously',
+      desc: 'Shake device hard',
+    },
+    {
+      value: 'posture',
+      label: 'Good posture',
+      icon: '🧍',
+      desc: 'Hold straight 10 s',
     },
   ]
 
-const SOUNDS = ['alarm-gentle', 'alarm-digital', 'alarm-loud']
+const PRESET_SOUNDS = [
+  { value: 'alarm-gentle', label: 'Gentle' },
+  { value: 'alarm-digital', label: 'Digital' },
+  { value: 'alarm-loud', label: 'Loud' },
+  { value: 'alarm-chime', label: 'Chime' },
+]
+
 const REPEATS: RepeatMode[] = [
   'none',
   'daily',
@@ -47,6 +60,7 @@ const DEFAULT: Omit<Alarm, 'id' | 'snoozeCount'> = {
   sound: 'alarm-gentle',
   volume: 0.8,
   snoozeLimit: 2,
+  snoozeDuration: 5,
 }
 
 export default function AlarmForm() {
@@ -56,6 +70,8 @@ export default function AlarmForm() {
   const { alarms, addAlarm, updateAlarm } = useAlarms()
 
   const [form, setForm] = useState<Omit<Alarm, 'id' | 'snoozeCount'>>(DEFAULT)
+  const [customFileName, setCustomFileName] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (editId) {
@@ -63,6 +79,8 @@ export default function AlarmForm() {
       if (found) {
         const { id, snoozeCount, ...rest } = found
         setForm(rest)
+        if (rest.sound.startsWith('custom:'))
+          setCustomFileName(rest.sound.slice(7))
       }
     }
   }, [editId, alarms])
@@ -78,6 +96,16 @@ export default function AlarmForm() {
     )
   }
 
+  const handleSoundFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    file.arrayBuffer().then((buf) => {
+      registerCustomSound(file.name, buf)
+      set('sound', `custom:${file.name}`)
+      setCustomFileName(file.name)
+    })
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (editId) {
@@ -87,6 +115,8 @@ export default function AlarmForm() {
     }
     router.push('/')
   }
+
+  const isCustomSound = form.sound.startsWith('custom:')
 
   return (
     <form className="alarm-form" onSubmit={handleSubmit}>
@@ -130,7 +160,7 @@ export default function AlarmForm() {
           ))}
         </div>
         {form.repeat === 'custom' && (
-          <div className="chip-row day-row">
+          <div className="chip-row day-row" style={{ marginTop: 8 }}>
             {DAY_NAMES.map((name, i) => (
               <button
                 key={i}
@@ -167,18 +197,47 @@ export default function AlarmForm() {
       {/* Sound */}
       <div className="form-group">
         <label>Alarm sound</label>
+
+        {/* Preset chips */}
         <div className="chip-row">
-          {SOUNDS.map((s) => (
+          {PRESET_SOUNDS.map((s) => (
             <button
-              key={s}
+              key={s.value}
               type="button"
-              className={`chip ${form.sound === s ? 'active' : ''}`}
-              onClick={() => set('sound', s)}
+              className={`chip ${form.sound === s.value ? 'active' : ''}`}
+              onClick={() => {
+                set('sound', s.value)
+                setCustomFileName(null)
+              }}
             >
-              {s.replace('alarm-', '')}
+              {s.label}
             </button>
           ))}
+          {/* Custom chip */}
+          <button
+            type="button"
+            className={`chip ${isCustomSound ? 'active' : ''}`}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            📁 {customFileName ? customFileName.slice(0, 18) : 'Upload…'}
+          </button>
         </div>
+
+        {/* Hidden file picker — audio only, stored in memory */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="audio/*"
+          style={{ display: 'none' }}
+          onChange={handleSoundFile}
+        />
+
+        {isCustomSound && (
+          <p className="form-hint">
+            ✅ Custom sound loaded. Note: re-select the file after a page
+            refresh.
+          </p>
+        )}
       </div>
 
       {/* Volume */}
@@ -205,6 +264,23 @@ export default function AlarmForm() {
           value={form.snoozeLimit}
           onChange={(e) => set('snoozeLimit', Number(e.target.value))}
         />
+      </div>
+
+      {/* Snooze duration */}
+      <div className="form-group">
+        <label>Snooze / remind-me duration — {form.snoozeDuration} min</label>
+        <input
+          type="range"
+          min="1"
+          max="30"
+          step="1"
+          value={form.snoozeDuration}
+          onChange={(e) => set('snoozeDuration', Number(e.target.value))}
+        />
+        <p className="form-hint">
+          When you snooze or tap "Remind me later", the alarm re-arms after this
+          many minutes.
+        </p>
       </div>
 
       <button type="submit" className="btn-primary full-width">

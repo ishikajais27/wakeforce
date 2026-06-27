@@ -3,9 +3,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import CameraView from './CameraView'
 import { TaskType } from '@/lib/types'
+import { postureColor, postureLabel } from '@/lib/poseUtils'
 
 const TARGET_REPS = 15
 const SHAKE_TARGET = 20
+const POSTURE_HOLD_SECS = 10 // good posture must be held for this long
+const POSTURE_GOOD_THRESHOLD = 70
 
 interface Props {
   task: TaskType
@@ -13,13 +16,14 @@ interface Props {
 }
 
 export default function ActivityOverlay({ task, onDismiss }: Props) {
+  // ── Squats ────────────────────────────────────────────────────────────
   const [squatsDone, setSquatsDone] = useState(false)
-
   const handleSquatComplete = useCallback(() => {
     setSquatsDone(true)
     onDismiss()
   }, [onDismiss])
 
+  // ── Math puzzle ───────────────────────────────────────────────────────
   const [mathQ, setMathQ] = useState<{ q: string; a: number } | null>(null)
   const [mathInput, setMathInput] = useState('')
   const [mathWrong, setMathWrong] = useState(false)
@@ -34,6 +38,7 @@ export default function ActivityOverlay({ task, onDismiss }: Props) {
     setMathQ({ q: `${a} ${op} ${b} = ?`, a: answer })
   }, [task])
 
+  // ── Shake ─────────────────────────────────────────────────────────────
   const [shakeCount, setShakeCount] = useState(0)
   const lastAcc = useRef({ x: 0, y: 0, z: 0 })
 
@@ -56,6 +61,43 @@ export default function ActivityOverlay({ task, onDismiss }: Props) {
     if (task === 'shake' && shakeCount >= SHAKE_TARGET) onDismiss()
   }, [shakeCount, task, onDismiss])
 
+  // ── Posture ───────────────────────────────────────────────────────────
+  const [postureScore, setPostureScore] = useState(0)
+  const [holdSecs, setHoldSecs] = useState(0)
+  const goodStartRef = useRef<number | null>(null)
+  const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const postureScoreRef = useRef(0)
+
+  const handlePostureScore = useCallback((score: number) => {
+    postureScoreRef.current = score
+    setPostureScore(score)
+  }, [])
+
+  useEffect(() => {
+    if (task !== 'posture') return
+
+    holdTimerRef.current = setInterval(() => {
+      const score = postureScoreRef.current
+      if (score >= POSTURE_GOOD_THRESHOLD) {
+        if (!goodStartRef.current) goodStartRef.current = Date.now()
+        const elapsed = Math.floor((Date.now() - goodStartRef.current) / 1000)
+        setHoldSecs(elapsed)
+        if (elapsed >= POSTURE_HOLD_SECS) {
+          clearInterval(holdTimerRef.current!)
+          onDismiss()
+        }
+      } else {
+        goodStartRef.current = null
+        setHoldSecs(0)
+      }
+    }, 250)
+
+    return () => {
+      if (holdTimerRef.current) clearInterval(holdTimerRef.current)
+    }
+  }, [task, onDismiss])
+
+  // ── Math submit ───────────────────────────────────────────────────────
   const handleMathSubmit = () => {
     if (Number(mathInput) === mathQ?.a) {
       onDismiss()
@@ -77,20 +119,29 @@ export default function ActivityOverlay({ task, onDismiss }: Props) {
           {task === 'squats' && '💪 Almost there!'}
           {task === 'math' && '🧠 Brain check!'}
           {task === 'shake' && '📳 Shake it off!'}
+          {task === 'posture' && '🧍 Stand up straight!'}
         </h2>
         <p className="activity-sub">
           {task === 'squats' &&
             `Do ${TARGET_REPS} squats to turn off the alarm`}
           {task === 'math' && 'Solve this to turn off the alarm'}
           {task === 'shake' && 'Shake your phone to turn off the alarm'}
+          {task === 'posture' &&
+            `Hold good posture for ${POSTURE_HOLD_SECS} seconds`}
         </p>
         {task === 'squats' && (
           <p className="activity-hint">
             🧍 Stand back so your whole body fits in frame
           </p>
         )}
+        {task === 'posture' && (
+          <p className="activity-hint">
+            📷 Face the camera and stand or sit upright
+          </p>
+        )}
       </div>
 
+      {/* Squats */}
       {task === 'squats' && !squatsDone && (
         <CameraView
           active
@@ -99,6 +150,94 @@ export default function ActivityOverlay({ task, onDismiss }: Props) {
         />
       )}
 
+      {/* Posture */}
+      {task === 'posture' && (
+        <>
+          <CameraView
+            active
+            targetReps={0}
+            onComplete={() => {}}
+            onPostureScore={handlePostureScore}
+          />
+
+          <div className="posture-panel">
+            {/* Score ring */}
+            <div className="posture-score-wrap">
+              <svg
+                width="96"
+                height="96"
+                viewBox="0 0 96 96"
+                aria-hidden="true"
+              >
+                <circle
+                  cx="48"
+                  cy="48"
+                  r="40"
+                  fill="none"
+                  stroke="rgba(255,255,255,0.1)"
+                  strokeWidth="8"
+                />
+                <circle
+                  cx="48"
+                  cy="48"
+                  r="40"
+                  fill="none"
+                  stroke={postureColor(postureScore)}
+                  strokeWidth="8"
+                  strokeDasharray={`${(2 * Math.PI * 40 * postureScore) / 100} ${2 * Math.PI * 40 * (1 - postureScore / 100)}`}
+                  strokeLinecap="round"
+                  strokeDashoffset={2 * Math.PI * 40 * 0.25}
+                  style={{
+                    transition: 'stroke-dasharray 0.3s ease, stroke 0.3s ease',
+                  }}
+                />
+                <text
+                  x="48"
+                  y="53"
+                  textAnchor="middle"
+                  fill="#fff"
+                  fontSize="18"
+                  fontWeight="700"
+                >
+                  {postureScore}
+                </text>
+              </svg>
+              <p
+                className="posture-label"
+                style={{ color: postureColor(postureScore) }}
+              >
+                {postureLabel(postureScore)}
+              </p>
+            </div>
+
+            {/* Hold timer */}
+            <div className="posture-hold">
+              {postureScore >= POSTURE_GOOD_THRESHOLD ? (
+                <>
+                  <div className="posture-hold-bar">
+                    <div
+                      className="posture-hold-fill"
+                      style={{
+                        width: `${(holdSecs / POSTURE_HOLD_SECS) * 100}%`,
+                        background: postureColor(postureScore),
+                      }}
+                    />
+                  </div>
+                  <p className="posture-hold-text">
+                    {POSTURE_HOLD_SECS - holdSecs}s more…
+                  </p>
+                </>
+              ) : (
+                <p className="posture-hold-text muted">
+                  Reach score ≥ {POSTURE_GOOD_THRESHOLD} to start the timer
+                </p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Math */}
       {task === 'math' && mathQ && (
         <div className="math-puzzle">
           <div className="math-question">{mathQ.q}</div>
@@ -119,6 +258,7 @@ export default function ActivityOverlay({ task, onDismiss }: Props) {
         </div>
       )}
 
+      {/* Shake */}
       {task === 'shake' && (
         <div className="shake-wrap">
           <svg
