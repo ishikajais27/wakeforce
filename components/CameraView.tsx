@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useEffect } from 'react'
+import { useRef } from 'react'
 import { usePoseDetection } from '@/hooks/usePoseDetection'
 import { postureColor, postureLabel } from '@/lib/poseUtils'
 
@@ -20,7 +20,6 @@ export default function CameraView({
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
-  const wrapRef = useRef<HTMLDivElement>(null) // NEW
 
   const { squat, postureScore, error, stage } = usePoseDetection({
     videoRef,
@@ -32,21 +31,6 @@ export default function CameraView({
     onPostureScore,
   })
 
-  // NEW: once video metadata is known, resize the container to match exactly
-  // so there are zero black bars regardless of landscape / portrait / any camera
-  useEffect(() => {
-    const video = videoRef.current
-    if (!video) return
-    const sync = () => {
-      if (!video.videoWidth || !wrapRef.current) return
-      // Set aspect-ratio so CSS handles the sizing; height drives width
-      wrapRef.current.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`
-    }
-    video.addEventListener('loadedmetadata', sync)
-    if (video.readyState >= 1) sync() // already loaded
-    return () => video.removeEventListener('loadedmetadata', sync)
-  }, [active])
-
   const isPostureMode = targetReps === 0
   const phaseLabel =
     squat.phase === 'calibrating'
@@ -56,7 +40,7 @@ export default function CameraView({
         : '⬆ Squat down'
 
   return (
-    <div ref={wrapRef} className="camera-wrap">
+    <div className="camera-wrap">
       {error ? (
         <div className="camera-error">
           <p>🚫 {error}</p>
