@@ -21,7 +21,7 @@ export default function CameraView({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
 
-  const { squat, postureScore, error, stage } = usePoseDetection({
+  const { squat, postureScore, error, stage, isRearCamera } = usePoseDetection({
     videoRef,
     canvasRef,
     innerRef,
@@ -49,8 +49,16 @@ export default function CameraView({
       ) : (
         <>
           <div ref={innerRef} className="camera-inner">
-            <video ref={videoRef} className="camera-feed" playsInline muted />
-            <canvas ref={canvasRef} className="camera-canvas" />
+            <video
+              ref={videoRef}
+              className={`camera-feed${isRearCamera ? ' rear-camera' : ''}`}
+              playsInline
+              muted
+            />
+            <canvas
+              ref={canvasRef}
+              className={`camera-canvas${isRearCamera ? ' rear-camera' : ''}`}
+            />
           </div>
 
           {stage !== 'tracking' && (

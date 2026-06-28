@@ -7,7 +7,6 @@ import {
   INITIAL_SQUAT_STATE,
   SquatState,
   angleDeg,
-  getLandmarkBoundingBox,
   computePostureScore,
 } from '@/lib/poseUtils'
 
@@ -27,8 +26,56 @@ interface UsePoseDetectionOptions {
   onPostureScore?: (score: number) => void
 }
 
+// Extend MediaTrackConstraintSet to include non-standard zoom + torch fields
+// that Chrome on Android supports but are absent from the TS lib types.
+interface ExtendedTrackConstraintSet extends MediaTrackConstraintSet {
+  zoom?: ConstrainDouble
+}
+interface ExtendedTrackConstraints extends MediaTrackConstraints {
+  advanced?: ExtendedTrackConstraintSet[]
+}
+interface ExtendedStreamConstraints {
+  video: ExtendedTrackConstraints
+}
+
 const LEG_MIN_VIS = 0.9
 const TORSO_MIN_VIS = 0.6
+
+// ── Pre-load the MediaPipe WASM bundle immediately when this module is
+//    imported — well before the user taps "Let's go". This eliminates the
+//    multi-second model-download delay that made the alarm feel slow.
+let _posePromise: Promise<any> | null = null
+
+function preloadPoseModel() {
+  if (_posePromise) return _posePromise
+  _posePromise = (async () => {
+    const { PoseLandmarker, FilesetResolver } =
+      await import('@mediapipe/tasks-vision')
+    const vision = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm',
+    )
+    const pose = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath:
+          'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+        delegate: 'GPU',
+      },
+      runningMode: 'VIDEO',
+      numPoses: 1,
+    })
+    return pose
+  })()
+  return _posePromise
+}
+
+// Kick off the download the moment this module is first imported
+// (i.e. as soon as the ringing page mounts its first import).
+if (typeof window !== 'undefined') {
+  preloadPoseModel().catch(() => {
+    // Reset so it can retry when the hook actually runs
+    _posePromise = null
+  })
+}
 
 export function usePoseDetection({
   videoRef,
@@ -43,6 +90,7 @@ export function usePoseDetection({
   const [postureScore, setPostureScore] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [stage, setStage] = useState<PoseStage>('loading-model')
+  const [isRearCamera, setIsRearCamera] = useState(false)
 
   const stateRef = useRef<SquatState>(INITIAL_SQUAT_STATE)
   const rafRef = useRef<number>(0)
@@ -52,6 +100,7 @@ export function usePoseDetection({
   const scoreTsRef = useRef(0)
   const onCompleteRef = useRef(onComplete)
   const onPostureScoreRef = useRef(onPostureScore)
+
   useEffect(() => {
     onCompleteRef.current = onComplete
   })
@@ -115,12 +164,13 @@ export function usePoseDetection({
     setPostureScore(0)
     setError(null)
     setStage('loading-model')
+    setIsRearCamera(false)
 
-    // Reset inner div transform so it never starts zoomed/panned
     if (innerRef?.current) {
       innerRef.current.style.transform = 'none'
     }
 
+    // Watchdog: 25 s (model is pre-loading so should be much faster)
     watchdogRef.current = setTimeout(() => {
       if (mounted) {
         setStage('error')
@@ -129,51 +179,149 @@ export function usePoseDetection({
             'it loads from cdn.jsdelivr.net and storage.googleapis.com on first use.',
         )
       }
-    }, 20000)
+    }, 25000)
+
+    // ── Wide-FOV camera acquisition ──────────────────────────────────────
+    // Uses the extended interface so TypeScript accepts `zoom` without errors.
+    // Tries front-cam ultra-wide first, falls back gracefully.
+    async function getWidestStream(): Promise<{
+      stream: MediaStream
+      rear: boolean
+    }> {
+      const attempts: Array<{
+        constraints: ExtendedStreamConstraints
+        rear: boolean
+      }> = [
+        // 1. Front cam, zoom 0.3 (ultra-wide on Chrome Android)
+        {
+          rear: false,
+          constraints: {
+            video: {
+              facingMode: { ideal: 'user' },
+              width: { ideal: 1080 },
+              height: { ideal: 1920 },
+              advanced: [{ zoom: 0.3 }],
+            },
+          },
+        },
+        // 2. Front cam, zoom 0.5
+        {
+          rear: false,
+          constraints: {
+            video: {
+              facingMode: { ideal: 'user' },
+              width: { ideal: 1080 },
+              height: { ideal: 1920 },
+              advanced: [{ zoom: 0.5 }],
+            },
+          },
+        },
+        // 3. Front cam, portrait, no zoom
+        {
+          rear: false,
+          constraints: {
+            video: {
+              facingMode: 'user',
+              width: { ideal: 720 },
+              height: { ideal: 1280 },
+            },
+          },
+        },
+        // 4. Rear cam ultra-wide
+        {
+          rear: true,
+          constraints: {
+            video: {
+              facingMode: 'environment',
+              width: { ideal: 1080 },
+              height: { ideal: 1920 },
+              advanced: [{ zoom: 0.3 }],
+            },
+          },
+        },
+        // 5. Absolute fallback
+        {
+          rear: false,
+          constraints: { video: {} },
+        },
+      ]
+
+      for (const attempt of attempts) {
+        try {
+          const s = await navigator.mediaDevices.getUserMedia(
+            attempt.constraints as MediaStreamConstraints,
+          )
+
+          // After getting the stream, push zoom to hardware minimum via
+          // applyConstraints — more reliable than getUserMedia advanced on
+          // many Android Chrome builds.
+          const track = s.getVideoTracks()[0]
+          if (track) {
+            const caps = (track.getCapabilities?.() ?? {}) as any
+            if (typeof caps.zoom?.min === 'number') {
+              const hardwareMin: number = caps.zoom.min
+              // Target the lowest zoom the hardware supports, max 0.4
+              const targetZoom = Math.min(hardwareMin, 0.4)
+              try {
+                await (track.applyConstraints as any)({
+                  advanced: [{ zoom: targetZoom }],
+                })
+              } catch {
+                /* zoom not writable on this device */
+              }
+            }
+          }
+
+          // Detect actual facing mode from track settings
+          const settings = track?.getSettings?.() ?? {}
+          const actualRear =
+            attempt.rear || (settings as any).facingMode === 'environment'
+
+          return { stream: s, rear: actualRear }
+        } catch {
+          /* try next */
+        }
+      }
+
+      // Should never reach here
+      const s = await navigator.mediaDevices.getUserMedia({ video: true })
+      return { stream: s, rear: false }
+    }
 
     const init = async () => {
       try {
-        const { PoseLandmarker, FilesetResolver } =
-          await import('@mediapipe/tasks-vision')
+        // ── Model: reuse the pre-loaded promise (likely already resolved) ──
+        const pose = await preloadPoseModel()
         if (!mounted) return
+        poseRef.current = pose
 
-        const vision = await FilesetResolver.forVisionTasks(
-          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm',
-        )
-        if (!mounted) return
-
-        poseRef.current = await PoseLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath:
-              'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
-            delegate: 'GPU',
-          },
-          runningMode: 'VIDEO',
-          numPoses: 1,
-        })
-        if (!mounted) {
-          poseRef.current?.close()
-          poseRef.current = null
-          return
-        }
         setStage('requesting-camera')
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 720 },
-            height: { ideal: 1280 },
-            facingMode: 'user',
-          },
-        })
+        // ── Camera ────────────────────────────────────────────────────────
+        const { stream, rear } = await getWidestStream()
+
         if (!mounted || !videoRef.current) {
           stream.getTracks().forEach((t) => t.stop())
           return
         }
 
-        videoRef.current.srcObject = stream
-        await videoRef.current.play()
+        if (mounted) setIsRearCamera(rear)
 
-        if (canvasRef.current) {
+        videoRef.current.srcObject = stream
+
+        // Use onloadedmetadata + play() in parallel for speed
+        await new Promise<void>((resolve) => {
+          const v = videoRef.current!
+          if (v.readyState >= 1) {
+            v.play().then(resolve).catch(resolve)
+          } else {
+            v.onloadedmetadata = () => v.play().then(resolve).catch(resolve)
+          }
+        })
+
+        if (!mounted) return
+
+        if (canvasRef.current && videoRef.current) {
           canvasRef.current.width = videoRef.current.videoWidth || 720
           canvasRef.current.height = videoRef.current.videoHeight || 1280
         }
@@ -204,9 +352,6 @@ export function usePoseDetection({
 
               if (ctx && results.landmarks?.[0]) {
                 const lms = results.landmarks[0]
-
-                // ADAPTIVE ZOOM REMOVED — it was causing the zoomed-out/panned mess.
-                // The container + object-fit:contain already shows the full body.
 
                 // ── Posture score (throttled ~5 fps) ──────────────────────
                 const now = performance.now()
@@ -332,10 +477,11 @@ export function usePoseDetection({
         (videoRef.current.srcObject as MediaStream)
           .getTracks()
           .forEach((t) => t.stop())
-      poseRef.current?.close()
+      // Don't close poseRef — it's shared via the module-level cache.
+      // Closing it would break subsequent uses in the same session.
       poseRef.current = null
     }
   }, [active, targetReps, drawSkeleton, videoRef, canvasRef, innerRef])
 
-  return { squat, postureScore, error, stage }
+  return { squat, postureScore, error, stage, isRearCamera }
 }

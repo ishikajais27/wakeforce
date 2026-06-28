@@ -9,6 +9,32 @@ import ActivityOverlay from '@/components/ActivityOverlay'
 
 const FIRING_KEY = 'wakeforce_firing'
 
+// ── Kick off MediaPipe preload the instant this page module is parsed ──
+// By the time the user taps "Let's go", the model is already downloaded.
+if (typeof window !== 'undefined') {
+  import('@mediapipe/tasks-vision')
+    .then(({ FilesetResolver, PoseLandmarker }) => {
+      FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm',
+      )
+        .then((vision) => {
+          PoseLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath:
+                'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+              delegate: 'GPU',
+            },
+            runningMode: 'VIDEO',
+            numPoses: 1,
+          }).catch(() => {
+            /* silent — will retry in hook */
+          })
+        })
+        .catch(() => {})
+    })
+    .catch(() => {})
+}
+
 export default function RingingPage() {
   const { snooze, dismiss } = useAlarms()
   const soundRef = useRef<AlarmSoundHandle | null>(null)
@@ -17,6 +43,7 @@ export default function RingingPage() {
   const [alarm, setAlarm] = useState<Alarm | null>(null)
   const [audioStarted, setAudioStarted] = useState(false)
 
+  // ── Load alarm data immediately ────────────────────────────────────────
   useEffect(() => {
     const raw = localStorage.getItem(FIRING_KEY)
     if (!raw) {
@@ -31,6 +58,7 @@ export default function RingingPage() {
     }
   }, [])
 
+  // ── Clock ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const tick = () =>
       setDisplayTime(
@@ -45,21 +73,30 @@ export default function RingingPage() {
     return () => clearInterval(id)
   }, [])
 
-  // KEY FIX: sound is generated live with Web Audio instead of playing a
-  // .mp3 that never existed in /public/sounds. start() also tells us
-  // honestly whether the browser actually let it play.
+  // ── Sound: create + attempt autoplay the instant alarm data is ready ───
+  // On mobile, autoplay is blocked until a user gesture. We attempt it
+  // immediately anyway — if it works (some browsers allow it for alarm-type
+  // pages), great. If not, the "tap anywhere" hint guides them.
   useEffect(() => {
     if (!alarm) return
+
     const handle = createAlarmSound(alarm.sound, alarm.volume ?? 0.8)
     soundRef.current = handle
-    handle.start().then(setAudioStarted)
+
+    // Try to start immediately (works on Android Chrome in many cases)
+    handle.start().then((started) => {
+      setAudioStarted(started)
+    })
+
     return () => {
       handle.stop()
       soundRef.current = null
     }
   }, [alarm])
 
+  // ── Tap-to-unlock audio (Safari / strict autoplay policy) ─────────────
   const startAudio = () => {
+    if (audioStarted) return
     soundRef.current?.start().then(setAudioStarted)
   }
 
@@ -69,7 +106,11 @@ export default function RingingPage() {
   }
 
   if (!alarm) {
-    return <div className="ringing-loading">Loading…</div>
+    return (
+      <div className="ringing-loading">
+        <div className="ringing-loading-spinner" />
+      </div>
+    )
   }
 
   const snoozesLeft = alarm.snoozeLimit - alarm.snoozeCount

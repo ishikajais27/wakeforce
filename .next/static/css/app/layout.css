@@ -433,6 +433,15 @@ input[type='range'] {
   font-weight: 600;
 }
 
+.ringing-loading-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 4px solid var(--border);
+  border-top-color: var(--accent);
+  animation: cam-spin 0.7s linear infinite;
+}
+
 /* ─── Pulse backdrop ─────────────────────────────────────────────────── */
 .pulse-backdrop {
   position: fixed;
@@ -584,47 +593,48 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
-  overflow: hidden; /* no scroll — camera fills screen */
+  gap: 2px;
+  padding: 4px 4px 0;
+  overflow: hidden;
 }
 
 .activity-header {
   flex-shrink: 0;
   text-align: center;
   width: 100%;
-  padding: 2px 0;
+  padding: 2px 0 2px;
 }
 .activity-header h2 {
   font-family: 'Fredoka', sans-serif;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.2;
 }
 .activity-sub {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   margin-top: 1px;
 }
 .activity-hint {
   color: var(--text-3);
-  font-size: 10px;
+  font-size: 9px;
   margin-top: 1px;
 }
 
 /* ─── Camera ─────────────────────────────────────────────────────────── */
 .camera-wrap {
-  /* Fill ALL remaining height after the tiny header */
+  /* Take every remaining pixel after the tiny header */
   flex: 1 1 0;
   min-height: 0;
-  /* Full width of the overlay */
   width: 100%;
-  border-radius: 14px;
+  /* No border-radius on sides so it bleeds edge-to-edge */
+  border-radius: 10px 10px 0 0;
   overflow: hidden;
   background: #000;
-  border: 2px solid var(--border);
   position: relative;
+  /* Safety floor so it never collapses */
+  min-height: 60vh;
 }
 
 .camera-inner {
@@ -640,14 +650,20 @@ input[type='range'] {
   width: 100%;
   height: 100%;
   /*
-   * contain = ALWAYS shows full body, zero cropping.
-   * The container is now ~95vh tall and full width,
-   * so black bars are minimal/gone on any camera ratio.
+   * cover fills the box — no black bars.
+   * Because we're requesting a very wide FOV (zoom 0.3-0.4x),
+   * the full body is captured in the source; cover just
+   * stretches it to fill the tall phone screen.
+   * If zoom fails and the source is still narrow, contain
+   * is safer — but cover looks much better when FOV is wide.
    */
-  -o-object-fit: contain;
-     object-fit: contain;
+  -o-object-fit: cover;
+     object-fit: cover;
   background: #000;
-  transform: scaleX(-1);
+  transform: scaleX(-1); /* mirror front cam */
+}
+.camera-feed.rear-camera {
+  transform: scaleX(1);
 }
 
 .camera-canvas {
@@ -655,9 +671,12 @@ input[type='range'] {
   inset: 0;
   width: 100%;
   height: 100%;
-  -o-object-fit: contain;
-     object-fit: contain;
+  -o-object-fit: cover;
+     object-fit: cover;
   transform: scaleX(-1);
+}
+.camera-canvas.rear-camera {
+  transform: scaleX(1);
 }
 
 .camera-badge {

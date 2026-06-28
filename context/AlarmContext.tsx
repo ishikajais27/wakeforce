@@ -16,7 +16,6 @@ const STORAGE_KEY = 'wakeforce_alarms'
 const FIRING_KEY = 'wakeforce_firing'
 const SNOOZE_KEY = 'wakeforce_snooze'
 const FIRED_LOG_KEY = 'wakeforce_fired_log'
-const SNOOZE_MINUTES = 5
 
 function load(): Alarm[] {
   if (typeof window === 'undefined') return []
@@ -49,9 +48,6 @@ function shouldFireNow(alarm: Alarm): boolean {
   return false
 }
 
-// Includes the date, not just hour:minute. The old key was just "H:M",
-// so once an alarm fired at 7:00 it could get blocked from ever firing
-// at 7:00 again the next day until it aged out of a size-capped list.
 function minuteKeyFor(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}_${d.getHours()}:${d.getMinutes()}`
 }
@@ -86,8 +82,6 @@ export function AlarmProvider({ children }: { children: ReactNode }) {
     alarmsRef.current = loaded
   }, [])
 
-  // Restore firingAlarm if we're actually on /ringing (survives a refresh
-  // mid-ring). Anywhere else, leftover FIRING_KEY is stale and gets cleared.
   useEffect(() => {
     if (typeof window === 'undefined') return
     const raw = localStorage.getItem(FIRING_KEY)
@@ -109,17 +103,13 @@ export function AlarmProvider({ children }: { children: ReactNode }) {
     save(next)
   }
 
-  // Poll every 10 seconds.
+  // ── Alarm check: runs every 5 s (was 10 s) for faster trigger ─────────
   useEffect(() => {
     const check = () => {
       if (typeof window === 'undefined') return
       const onRingingPage = window.location.pathname === '/ringing'
 
-      // ── Pending snooze ──────────────────────────────────────────────────
-      // KEY FIX: this used to be a JS setTimeout set right before
-      // `window.location.href = '/'`. That navigation is a full reload,
-      // which kills the timer instantly — snooze never actually re-fired.
-      // Persisting the wake-up time in localStorage survives the reload.
+      // ── Pending snooze ───────────────────────────────────────────────
       const snoozeRaw = localStorage.getItem(SNOOZE_KEY)
       if (snoozeRaw) {
         try {
@@ -141,10 +131,9 @@ export function AlarmProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Never re-trigger while already showing the ringing UI.
       if (onRingingPage) return
 
-      // ── Normal scheduled alarms ──────────────────────────────────────────
+      // ── Normal scheduled alarms ──────────────────────────────────────
       const now = new Date()
       const keyBase = minuteKeyFor(now)
       const fired = loadFiredLog()
@@ -158,14 +147,16 @@ export function AlarmProvider({ children }: { children: ReactNode }) {
           saveFiredLog(fired)
           localStorage.setItem(FIRING_KEY, JSON.stringify(alarm))
           setFiringAlarm(alarm)
-          window.location.href = '/ringing'
+          // Use replace so back-button doesn't loop
+          window.location.replace('/ringing')
           return
         }
       }
     }
 
+    // Run immediately on mount, then every 5 seconds
     check()
-    const id = setInterval(check, 10_000)
+    const id = setInterval(check, 5_000)
     return () => clearInterval(id)
   }, [])
 
@@ -189,17 +180,16 @@ export function AlarmProvider({ children }: { children: ReactNode }) {
     if (firingAlarm.snoozeCount >= firingAlarm.snoozeLimit) return
     const snoozed = { ...firingAlarm, snoozeCount: firingAlarm.snoozeCount + 1 }
     updateAlarm(firingAlarm.id, { snoozeCount: snoozed.snoozeCount })
-
     localStorage.setItem(
       SNOOZE_KEY,
       JSON.stringify({
         alarm: snoozed,
-        fireAt: Date.now() + SNOOZE_MINUTES * 60 * 1000,
+        fireAt: Date.now() + (firingAlarm.snoozeDuration ?? 5) * 60 * 1000,
       }),
     )
     localStorage.removeItem(FIRING_KEY)
     setFiringAlarm(null)
-    window.location.href = '/'
+    window.location.replace('/')
   }, [firingAlarm, updateAlarm])
 
   const dismiss = useCallback(() => {
@@ -212,7 +202,7 @@ export function AlarmProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(FIRING_KEY)
     localStorage.removeItem(SNOOZE_KEY)
     setFiringAlarm(null)
-    window.location.href = '/'
+    window.location.replace('/')
   }, [firingAlarm, updateAlarm])
 
   return (
