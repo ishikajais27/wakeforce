@@ -79,7 +79,6 @@ async function applyMinZoom(stream: MediaStream): Promise<void> {
   }
 }
 
-// ── Find the widest-FOV camera ────────────────────────────────────────────
 async function getWidestFOVStream(preferEnvironment = false): Promise<{
   stream: MediaStream
   rear: boolean
@@ -111,10 +110,7 @@ async function getWidestFOVStream(preferEnvironment = false): Promise<{
     devices = all.filter((d) => d.kind === 'videoinput')
   } catch {
     await applyMinZoom(permStream)
-    return {
-      stream: permStream,
-      rear: preferEnvironment,
-    }
+    return { stream: permStream, rear: preferEnvironment }
   }
 
   permStream.getTracks().forEach((t) => t.stop())
@@ -132,6 +128,7 @@ async function getWidestFOVStream(preferEnvironment = false): Promise<{
     maxWidth: number
     isFront: boolean
     isRear: boolean
+    isUltraWide: boolean
   }
 
   const scores: DeviceScore[] = []
@@ -169,6 +166,14 @@ async function getWidestFOVStream(preferEnvironment = false): Promise<{
         label.includes('facing back') ||
         label.includes('environment')
 
+      // Detect ultra-wide: by label keyword or very low reported minZoom
+      const isUltraWide =
+        label.includes('ultra') ||
+        label.includes('ultrawide') ||
+        label.includes('wide angle') ||
+        label.includes('0.5') ||
+        (minZoom !== 999 && minZoom <= 0.6)
+
       scores.push({
         deviceId: device.deviceId,
         label: device.label,
@@ -176,6 +181,7 @@ async function getWidestFOVStream(preferEnvironment = false): Promise<{
         maxWidth,
         isFront,
         isRear,
+        isUltraWide,
       })
 
       probe.getTracks().forEach((t) => t.stop())
@@ -190,15 +196,17 @@ async function getWidestFOVStream(preferEnvironment = false): Promise<{
   }
 
   // ── Step 4: select best candidate ─────────────────────────────────────
-  // If preferEnvironment, rank rear cameras first; otherwise front cameras.
   const preferredPool = preferEnvironment
     ? scores.filter((s) => s.isRear)
     : scores.filter((s) => s.isFront)
 
   const pool = preferredPool.length > 0 ? preferredPool : scores
 
-  // Sort: lowest minZoom first (widest FOV), then highest maxWidth
+  // Ultra-wide first → then lowest minZoom (widest FOV) → then highest resolution
   pool.sort((a, b) => {
+    const aUW = a.isUltraWide ? 0 : 1
+    const bUW = b.isUltraWide ? 0 : 1
+    if (aUW !== bUW) return aUW - bUW
     if (a.minZoom !== b.minZoom) return a.minZoom - b.minZoom
     return b.maxWidth - a.maxWidth
   })
@@ -206,16 +214,21 @@ async function getWidestFOVStream(preferEnvironment = false): Promise<{
   const best = pool[0]
   const isRear = best.isRear || (!best.isFront && preferEnvironment)
 
-  // ── Step 5: open best device at full portrait resolution ──────────────
+  // ── Step 5: open best device, push zoom to hardware minimum ──────────
   let finalStream: MediaStream
   try {
+    const videoConstraints: MediaTrackConstraints = {
+      deviceId: { exact: best.deviceId },
+      width: { ideal: 1080 },
+      height: { ideal: 1920 },
+      aspectRatio: { ideal: 9 / 16 },
+    }
+    // Request minimum zoom at capture time if the browser supports it
+    if (best.minZoom !== 999) {
+      ;(videoConstraints as any).zoom = best.minZoom
+    }
     finalStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        deviceId: { exact: best.deviceId },
-        width: { ideal: 1080 },
-        height: { ideal: 1920 },
-        aspectRatio: { ideal: 9 / 16 },
-      },
+      video: videoConstraints,
     })
   } catch {
     finalStream = await navigator.mediaDevices.getUserMedia({
@@ -227,6 +240,7 @@ async function getWidestFOVStream(preferEnvironment = false): Promise<{
     })
   }
 
+  // Always try to push zoom to minimum via applyConstraints as well
   await applyMinZoom(finalStream)
 
   return { stream: finalStream, rear: isRear }
