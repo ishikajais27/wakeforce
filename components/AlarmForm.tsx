@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useAlarms } from '@/context/AlarmContext'
 import { Alarm, RepeatMode, TaskType } from '@/lib/types'
 import { DAY_NAMES } from '@/lib/alarmUtils'
-import { registerCustomSound } from '@/lib/alarmSound'
+import { registerCustomSound, saveCustomSoundToDB } from '@/lib/alarmSound'
 
 const TASKS: { value: TaskType; label: string; icon: string; desc: string }[] =
   [
@@ -71,6 +71,7 @@ export default function AlarmForm() {
 
   const [form, setForm] = useState<Omit<Alarm, 'id' | 'snoozeCount'>>(DEFAULT)
   const [customFileName, setCustomFileName] = useState<string | null>(null)
+  const [isSavingSound, setIsSavingSound] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -99,10 +100,16 @@ export default function AlarmForm() {
   const handleSoundFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    file.arrayBuffer().then((buf) => {
+    setIsSavingSound(true)
+
+    file.arrayBuffer().then(async (buf) => {
+      // 1. Register in memory for immediate use this session
       registerCustomSound(file.name, buf)
+      // 2. Persist to IndexedDB so it survives page reloads
+      await saveCustomSoundToDB(file.name, buf).catch(() => {})
       set('sound', `custom:${file.name}`)
       setCustomFileName(file.name)
+      setIsSavingSound(false)
     })
   }
 
@@ -198,7 +205,6 @@ export default function AlarmForm() {
       <div className="form-group">
         <label>Alarm sound</label>
 
-        {/* Preset chips */}
         <div className="chip-row">
           {PRESET_SOUNDS.map((s) => (
             <button
@@ -213,17 +219,20 @@ export default function AlarmForm() {
               {s.label}
             </button>
           ))}
-          {/* Custom chip */}
+          {/* Custom upload chip */}
           <button
             type="button"
             className={`chip ${isCustomSound ? 'active' : ''}`}
             onClick={() => fileInputRef.current?.click()}
+            disabled={isSavingSound}
           >
-            📁 {customFileName ? customFileName.slice(0, 18) : 'Upload…'}
+            {isSavingSound
+              ? '⏳ Saving…'
+              : `📁 ${customFileName ? customFileName.slice(0, 16) : 'Upload…'}`}
           </button>
         </div>
 
-        {/* Hidden file picker — audio only, stored in memory */}
+        {/* Hidden file picker — audio only */}
         <input
           ref={fileInputRef}
           type="file"
@@ -232,10 +241,9 @@ export default function AlarmForm() {
           onChange={handleSoundFile}
         />
 
-        {isCustomSound && (
+        {isCustomSound && !isSavingSound && (
           <p className="form-hint">
-            ✅ Custom sound loaded. Note: re-select the file after a page
-            refresh.
+            ✅ Custom sound saved — plays even after a page refresh.
           </p>
         )}
       </div>
@@ -268,7 +276,7 @@ export default function AlarmForm() {
 
       {/* Snooze duration */}
       <div className="form-group">
-        <label>Snooze / remind-me duration — {form.snoozeDuration} min</label>
+        <label>Snooze duration — {form.snoozeDuration} min</label>
         <input
           type="range"
           min="1"
@@ -278,8 +286,7 @@ export default function AlarmForm() {
           onChange={(e) => set('snoozeDuration', Number(e.target.value))}
         />
         <p className="form-hint">
-          When you snooze or tap "Remind me later", the alarm re-arms after this
-          many minutes.
+          Re-arms the alarm after this many minutes when you snooze.
         </p>
       </div>
 

@@ -7,6 +7,7 @@ import {
   useCallback,
   useRef,
   useEffect,
+  useMemo,
   ReactNode,
 } from 'react'
 import { Alarm, AlarmContextValue } from '@/lib/types'
@@ -97,13 +98,13 @@ export function AlarmProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const persist = (next: Alarm[]) => {
+  const persist = useCallback((next: Alarm[]) => {
     alarmsRef.current = next
     setAlarms(next)
     save(next)
-  }
+  }, [])
 
-  // ── Alarm check: runs every 5 s (was 10 s) for faster trigger ─────────
+  // ── Alarm check runs every 5 s ─────────────────────────────────────────
   useEffect(() => {
     const check = () => {
       if (typeof window === 'undefined') return
@@ -147,38 +148,48 @@ export function AlarmProvider({ children }: { children: ReactNode }) {
           saveFiredLog(fired)
           localStorage.setItem(FIRING_KEY, JSON.stringify(alarm))
           setFiringAlarm(alarm)
-          // Use replace so back-button doesn't loop
           window.location.replace('/ringing')
           return
         }
       }
     }
 
-    // Run immediately on mount, then every 5 seconds
     check()
     const id = setInterval(check, 5_000)
     return () => clearInterval(id)
   }, [])
 
-  const addAlarm = useCallback((a: Omit<Alarm, 'id' | 'snoozeCount'>) => {
-    const alarm: Alarm = { ...a, id: uid(), snoozeCount: 0 }
-    persist([...alarmsRef.current, alarm])
-  }, [])
+  const addAlarm = useCallback(
+    (a: Omit<Alarm, 'id' | 'snoozeCount'>) => {
+      const alarm: Alarm = { ...a, id: uid(), snoozeCount: 0 }
+      persist([...alarmsRef.current, alarm])
+    },
+    [persist],
+  )
 
-  const updateAlarm = useCallback((id: string, patch: Partial<Alarm>) => {
-    persist(
-      alarmsRef.current.map((a) => (a.id === id ? { ...a, ...patch } : a)),
-    )
-  }, [])
+  const updateAlarm = useCallback(
+    (id: string, patch: Partial<Alarm>) => {
+      persist(
+        alarmsRef.current.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+      )
+    },
+    [persist],
+  )
 
-  const deleteAlarm = useCallback((id: string) => {
-    persist(alarmsRef.current.filter((a) => a.id !== id))
-  }, [])
+  const deleteAlarm = useCallback(
+    (id: string) => {
+      persist(alarmsRef.current.filter((a) => a.id !== id))
+    },
+    [persist],
+  )
 
   const snooze = useCallback(() => {
     if (!firingAlarm) return
     if (firingAlarm.snoozeCount >= firingAlarm.snoozeLimit) return
-    const snoozed = { ...firingAlarm, snoozeCount: firingAlarm.snoozeCount + 1 }
+    const snoozed = {
+      ...firingAlarm,
+      snoozeCount: firingAlarm.snoozeCount + 1,
+    }
     updateAlarm(firingAlarm.id, { snoozeCount: snoozed.snoozeCount })
     localStorage.setItem(
       SNOOZE_KEY,
@@ -205,21 +216,21 @@ export function AlarmProvider({ children }: { children: ReactNode }) {
     window.location.replace('/')
   }, [firingAlarm, updateAlarm])
 
-  return (
-    <Ctx.Provider
-      value={{
-        alarms,
-        addAlarm,
-        updateAlarm,
-        deleteAlarm,
-        firingAlarm,
-        snooze,
-        dismiss,
-      }}
-    >
-      {children}
-    </Ctx.Provider>
+  // Memoize the context value to prevent unnecessary re-renders of consumers
+  const value = useMemo<AlarmContextValue>(
+    () => ({
+      alarms,
+      addAlarm,
+      updateAlarm,
+      deleteAlarm,
+      firingAlarm,
+      snooze,
+      dismiss,
+    }),
+    [alarms, addAlarm, updateAlarm, deleteAlarm, firingAlarm, snooze, dismiss],
   )
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
 export function useAlarms(): AlarmContextValue {

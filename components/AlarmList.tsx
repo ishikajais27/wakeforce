@@ -1,5 +1,6 @@
 'use client'
 
+import { memo } from 'react'
 import Link from 'next/link'
 import { useAlarms } from '@/context/AlarmContext'
 import { DAY_LABELS } from '@/lib/alarmUtils'
@@ -9,6 +10,7 @@ const TASK_ICONS: Record<string, string> = {
   squats: '🏋️',
   math: '🧮',
   shake: '📳',
+  posture: '🧍',
 }
 
 export default function AlarmList() {
@@ -39,7 +41,7 @@ export default function AlarmList() {
   )
 }
 
-function AlarmCard({
+const AlarmCard = memo(function AlarmCard({
   alarm,
   onToggle,
   onDelete,
@@ -99,4 +101,4 @@ function AlarmCard({
       </div>
     </li>
   )
-}
+})

@@ -24,26 +24,15 @@ interface UsePoseDetectionOptions {
   targetReps: number
   onComplete: () => void
   onPostureScore?: (score: number) => void
-}
-
-// Extend MediaTrackConstraintSet to include non-standard zoom + torch fields
-// that Chrome on Android supports but are absent from the TS lib types.
-interface ExtendedTrackConstraintSet extends MediaTrackConstraintSet {
-  zoom?: ConstrainDouble
-}
-interface ExtendedTrackConstraints extends MediaTrackConstraints {
-  advanced?: ExtendedTrackConstraintSet[]
-}
-interface ExtendedStreamConstraints {
-  video: ExtendedTrackConstraints
+  /** Prefer rear (environment) camera for wider field-of-view.
+   *  Recommended for squats; front camera preferred for posture. */
+  preferEnvironment?: boolean
 }
 
 const LEG_MIN_VIS = 0.9
 const TORSO_MIN_VIS = 0.6
 
-// ── Pre-load the MediaPipe WASM bundle immediately when this module is
-//    imported — well before the user taps "Let's go". This eliminates the
-//    multi-second model-download delay that made the alarm feel slow.
+// ── Module-level model cache ───────────────────────────────────────────────
 let _posePromise: Promise<any> | null = null
 
 function preloadPoseModel() {
@@ -54,7 +43,7 @@ function preloadPoseModel() {
     const vision = await FilesetResolver.forVisionTasks(
       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm',
     )
-    const pose = await PoseLandmarker.createFromOptions(vision, {
+    return PoseLandmarker.createFromOptions(vision, {
       baseOptions: {
         modelAssetPath:
           'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
@@ -63,20 +52,187 @@ function preloadPoseModel() {
       runningMode: 'VIDEO',
       numPoses: 1,
     })
-    return pose
   })()
+  _posePromise.catch(() => {
+    _posePromise = null
+  })
   return _posePromise
 }
 
-// Kick off the download the moment this module is first imported
-// (i.e. as soon as the ringing page mounts its first import).
 if (typeof window !== 'undefined') {
-  preloadPoseModel().catch(() => {
-    // Reset so it can retry when the hook actually runs
-    _posePromise = null
-  })
+  preloadPoseModel().catch(() => {})
 }
 
+// ── Push zoom to hardware minimum for widest FOV ──────────────────────────
+async function applyMinZoom(stream: MediaStream): Promise<void> {
+  const track = stream.getVideoTracks()[0]
+  if (!track) return
+  const caps = (track.getCapabilities?.() ?? {}) as any
+  if (typeof caps.zoom?.min === 'number') {
+    try {
+      await (track.applyConstraints as any)({
+        advanced: [{ zoom: caps.zoom.min }],
+      })
+    } catch {
+      /* zoom constraint not writable */
+    }
+  }
+}
+
+// ── Find the widest-FOV camera ────────────────────────────────────────────
+async function getWidestFOVStream(preferEnvironment = false): Promise<{
+  stream: MediaStream
+  rear: boolean
+}> {
+  const primaryFacing = preferEnvironment ? 'environment' : 'user'
+  const fallbackFacing = preferEnvironment ? 'user' : 'environment'
+
+  // ── Step 1: get permission with preferred facing mode ─────────────────
+  let permStream: MediaStream
+  try {
+    permStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: primaryFacing },
+    })
+  } catch {
+    try {
+      permStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: fallbackFacing },
+      })
+    } catch {
+      const s = await navigator.mediaDevices.getUserMedia({ video: true })
+      return { stream: s, rear: false }
+    }
+  }
+
+  // ── Step 2: enumerate video input devices ─────────────────────────────
+  let devices: MediaDeviceInfo[] = []
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices()
+    devices = all.filter((d) => d.kind === 'videoinput')
+  } catch {
+    await applyMinZoom(permStream)
+    return {
+      stream: permStream,
+      rear: preferEnvironment,
+    }
+  }
+
+  permStream.getTracks().forEach((t) => t.stop())
+
+  if (devices.length === 0) {
+    const s = await navigator.mediaDevices.getUserMedia({ video: true })
+    return { stream: s, rear: false }
+  }
+
+  // ── Step 3: probe each device for capabilities ────────────────────────
+  interface DeviceScore {
+    deviceId: string
+    label: string
+    minZoom: number
+    maxWidth: number
+    isFront: boolean
+    isRear: boolean
+  }
+
+  const scores: DeviceScore[] = []
+
+  for (const device of devices) {
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: { exact: device.deviceId },
+          width: { ideal: 1080 },
+          height: { ideal: 1920 },
+        },
+      })
+      const track = probe.getVideoTracks()[0]
+      const caps = (track.getCapabilities?.() ?? {}) as any
+      const settings = (track.getSettings?.() ?? {}) as any
+
+      const minZoom: number =
+        typeof caps.zoom?.min === 'number' ? caps.zoom.min : 999
+      const maxWidth: number =
+        typeof caps.width?.max === 'number' ? caps.width.max : 0
+      const facingMode: string = settings.facingMode ?? ''
+      const label = device.label.toLowerCase()
+
+      const isFront =
+        facingMode === 'user' ||
+        label.includes('front') ||
+        label.includes('selfie') ||
+        label.includes('facing front')
+
+      const isRear =
+        facingMode === 'environment' ||
+        label.includes('back') ||
+        label.includes('rear') ||
+        label.includes('facing back') ||
+        label.includes('environment')
+
+      scores.push({
+        deviceId: device.deviceId,
+        label: device.label,
+        minZoom,
+        maxWidth,
+        isFront,
+        isRear,
+      })
+
+      probe.getTracks().forEach((t) => t.stop())
+    } catch {
+      /* device not accessible — skip */
+    }
+  }
+
+  if (scores.length === 0) {
+    const s = await navigator.mediaDevices.getUserMedia({ video: true })
+    return { stream: s, rear: false }
+  }
+
+  // ── Step 4: select best candidate ─────────────────────────────────────
+  // If preferEnvironment, rank rear cameras first; otherwise front cameras.
+  const preferredPool = preferEnvironment
+    ? scores.filter((s) => s.isRear)
+    : scores.filter((s) => s.isFront)
+
+  const pool = preferredPool.length > 0 ? preferredPool : scores
+
+  // Sort: lowest minZoom first (widest FOV), then highest maxWidth
+  pool.sort((a, b) => {
+    if (a.minZoom !== b.minZoom) return a.minZoom - b.minZoom
+    return b.maxWidth - a.maxWidth
+  })
+
+  const best = pool[0]
+  const isRear = best.isRear || (!best.isFront && preferEnvironment)
+
+  // ── Step 5: open best device at full portrait resolution ──────────────
+  let finalStream: MediaStream
+  try {
+    finalStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        deviceId: { exact: best.deviceId },
+        width: { ideal: 1080 },
+        height: { ideal: 1920 },
+        aspectRatio: { ideal: 9 / 16 },
+      },
+    })
+  } catch {
+    finalStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: isRear ? 'environment' : 'user',
+        width: { ideal: 1080 },
+        height: { ideal: 1920 },
+      },
+    })
+  }
+
+  await applyMinZoom(finalStream)
+
+  return { stream: finalStream, rear: isRear }
+}
+
+// ── Hook ───────────────────────────────────────────────────────────────────
 export function usePoseDetection({
   videoRef,
   canvasRef,
@@ -85,6 +241,7 @@ export function usePoseDetection({
   targetReps,
   onComplete,
   onPostureScore,
+  preferEnvironment = false,
 }: UsePoseDetectionOptions) {
   const [squat, setSquat] = useState<SquatState>(INITIAL_SQUAT_STATE)
   const [postureScore, setPostureScore] = useState(0)
@@ -100,6 +257,8 @@ export function usePoseDetection({
   const scoreTsRef = useRef(0)
   const onCompleteRef = useRef(onComplete)
   const onPostureScoreRef = useRef(onPostureScore)
+  // Track last drawn landmarks to skip redundant redraws
+  const lastLandmarkHashRef = useRef(0)
 
   useEffect(() => {
     onCompleteRef.current = onComplete
@@ -108,8 +267,25 @@ export function usePoseDetection({
     onPostureScoreRef.current = onPostureScore
   })
 
+  /** Cheap hash of landmark positions to detect movement */
+  const landmarkHash = useCallback((landmarks: any[]): number => {
+    let h = 0
+    // Sample every 4th landmark for speed
+    for (let i = 0; i < landmarks.length; i += 4) {
+      const lm = landmarks[i]
+      if (!lm) continue
+      h = ((((h * 31 + lm.x * 1000) | 0) * 31 + lm.y * 1000) | 0) & 0x7fffffff
+    }
+    return h
+  }, [])
+
   const drawSkeleton = useCallback(
     (landmarks: any[], ctx: CanvasRenderingContext2D) => {
+      const hash = landmarkHash(landmarks)
+      // Skip redraw if landmarks haven't changed meaningfully
+      if (hash === lastLandmarkHashRef.current) return
+      lastLandmarkHashRef.current = hash
+
       const CONNECTIONS = [
         [23, 25],
         [25, 27],
@@ -151,7 +327,7 @@ export function usePoseDetection({
         ctx.fill()
       })
     },
-    [],
+    [landmarkHash],
   )
 
   useEffect(() => {
@@ -160,6 +336,7 @@ export function usePoseDetection({
 
     stateRef.current = INITIAL_SQUAT_STATE
     completedRef.current = false
+    lastLandmarkHashRef.current = 0
     setSquat(INITIAL_SQUAT_STATE)
     setPostureScore(0)
     setError(null)
@@ -170,146 +347,35 @@ export function usePoseDetection({
       innerRef.current.style.transform = 'none'
     }
 
-    // Watchdog: 25 s (model is pre-loading so should be much faster)
     watchdogRef.current = setTimeout(() => {
       if (mounted) {
         setStage('error')
         setError(
-          'Taking too long to load the pose model. Check your internet connection — ' +
-            'it loads from cdn.jsdelivr.net and storage.googleapis.com on first use.',
+          'Taking too long to load. Check your internet connection and camera permissions.',
         )
       }
-    }, 25000)
-
-    // ── Wide-FOV camera acquisition ──────────────────────────────────────
-    // Uses the extended interface so TypeScript accepts `zoom` without errors.
-    // Tries front-cam ultra-wide first, falls back gracefully.
-    async function getWidestStream(): Promise<{
-      stream: MediaStream
-      rear: boolean
-    }> {
-      const attempts: Array<{
-        constraints: ExtendedStreamConstraints
-        rear: boolean
-      }> = [
-        // 1. Front cam, zoom 0.3 (ultra-wide on Chrome Android)
-        {
-          rear: false,
-          constraints: {
-            video: {
-              facingMode: { ideal: 'user' },
-              width: { ideal: 1080 },
-              height: { ideal: 1920 },
-              advanced: [{ zoom: 0.3 }],
-            },
-          },
-        },
-        // 2. Front cam, zoom 0.5
-        {
-          rear: false,
-          constraints: {
-            video: {
-              facingMode: { ideal: 'user' },
-              width: { ideal: 1080 },
-              height: { ideal: 1920 },
-              advanced: [{ zoom: 0.5 }],
-            },
-          },
-        },
-        // 3. Front cam, portrait, no zoom
-        {
-          rear: false,
-          constraints: {
-            video: {
-              facingMode: 'user',
-              width: { ideal: 720 },
-              height: { ideal: 1280 },
-            },
-          },
-        },
-        // 4. Rear cam ultra-wide
-        {
-          rear: true,
-          constraints: {
-            video: {
-              facingMode: 'environment',
-              width: { ideal: 1080 },
-              height: { ideal: 1920 },
-              advanced: [{ zoom: 0.3 }],
-            },
-          },
-        },
-        // 5. Absolute fallback
-        {
-          rear: false,
-          constraints: { video: {} },
-        },
-      ]
-
-      for (const attempt of attempts) {
-        try {
-          const s = await navigator.mediaDevices.getUserMedia(
-            attempt.constraints as MediaStreamConstraints,
-          )
-
-          // After getting the stream, push zoom to hardware minimum via
-          // applyConstraints — more reliable than getUserMedia advanced on
-          // many Android Chrome builds.
-          const track = s.getVideoTracks()[0]
-          if (track) {
-            const caps = (track.getCapabilities?.() ?? {}) as any
-            if (typeof caps.zoom?.min === 'number') {
-              const hardwareMin: number = caps.zoom.min
-              // Target the lowest zoom the hardware supports, max 0.4
-              const targetZoom = Math.min(hardwareMin, 0.4)
-              try {
-                await (track.applyConstraints as any)({
-                  advanced: [{ zoom: targetZoom }],
-                })
-              } catch {
-                /* zoom not writable on this device */
-              }
-            }
-          }
-
-          // Detect actual facing mode from track settings
-          const settings = track?.getSettings?.() ?? {}
-          const actualRear =
-            attempt.rear || (settings as any).facingMode === 'environment'
-
-          return { stream: s, rear: actualRear }
-        } catch {
-          /* try next */
-        }
-      }
-
-      // Should never reach here
-      const s = await navigator.mediaDevices.getUserMedia({ video: true })
-      return { stream: s, rear: false }
-    }
+    }, 30_000)
 
     const init = async () => {
       try {
-        // ── Model: reuse the pre-loaded promise (likely already resolved) ──
+        // ── Model (uses cache — fast after first load) ─────────────────
         const pose = await preloadPoseModel()
         if (!mounted) return
         poseRef.current = pose
 
         setStage('requesting-camera')
 
-        // ── Camera ────────────────────────────────────────────────────────
-        const { stream, rear } = await getWidestStream()
+        // ── Camera: pick widest-FOV device ────────────────────────────
+        const { stream, rear } = await getWidestFOVStream(preferEnvironment)
 
         if (!mounted || !videoRef.current) {
           stream.getTracks().forEach((t) => t.stop())
           return
         }
 
-        if (mounted) setIsRearCamera(rear)
-
+        setIsRearCamera(rear)
         videoRef.current.srcObject = stream
 
-        // Use onloadedmetadata + play() in parallel for speed
         await new Promise<void>((resolve) => {
           const v = videoRef.current!
           if (v.readyState >= 1) {
@@ -322,8 +388,8 @@ export function usePoseDetection({
         if (!mounted) return
 
         if (canvasRef.current && videoRef.current) {
-          canvasRef.current.width = videoRef.current.videoWidth || 720
-          canvasRef.current.height = videoRef.current.videoHeight || 1280
+          canvasRef.current.width = videoRef.current.videoWidth || 1080
+          canvasRef.current.height = videoRef.current.videoHeight || 1920
         }
 
         setStage('tracking')
@@ -332,13 +398,19 @@ export function usePoseDetection({
         let lastVideoTime = -1
 
         const detect = () => {
-          if (
-            !mounted ||
-            !poseRef.current ||
-            !videoRef.current ||
-            !canvasRef.current
-          )
+          if (!mounted) return
+
+          // Pause processing when the screen/tab is hidden
+          if (document.hidden) {
+            rafRef.current = requestAnimationFrame(detect)
             return
+          }
+
+          if (!poseRef.current || !videoRef.current || !canvasRef.current) {
+            rafRef.current = requestAnimationFrame(detect)
+            return
+          }
+
           const video = videoRef.current
 
           if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
@@ -353,7 +425,7 @@ export function usePoseDetection({
               if (ctx && results.landmarks?.[0]) {
                 const lms = results.landmarks[0]
 
-                // ── Posture score (throttled ~5 fps) ──────────────────────
+                // ── Posture score (throttled to every 200 ms) ──────────
                 const now = performance.now()
                 if (now - scoreTsRef.current > 200) {
                   scoreTsRef.current = now
@@ -362,7 +434,7 @@ export function usePoseDetection({
                   onPostureScoreRef.current?.(ps)
                 }
 
-                // ── Squat counting ────────────────────────────────────────
+                // ── Squat rep counting ─────────────────────────────────
                 if (targetReps > 0) {
                   const lHip = lms[23],
                     lKnee = lms[25],
@@ -437,17 +509,19 @@ export function usePoseDetection({
 
                 drawSkeleton(lms, ctx)
               } else {
-                canvasRef.current
-                  .getContext('2d')
-                  ?.clearRect(
+                const ctx2d = canvasRef.current?.getContext('2d')
+                if (ctx2d) {
+                  ctx2d.clearRect(
                     0,
                     0,
-                    canvasRef.current.width,
-                    canvasRef.current.height,
+                    canvasRef.current!.width,
+                    canvasRef.current!.height,
                   )
+                }
+                lastLandmarkHashRef.current = 0
               }
             } catch {
-              /* skip frame silently */
+              /* skip frame on error */
             }
           }
 
@@ -473,15 +547,23 @@ export function usePoseDetection({
       mounted = false
       if (watchdogRef.current) clearTimeout(watchdogRef.current)
       cancelAnimationFrame(rafRef.current)
-      if (videoRef.current?.srcObject)
-        (videoRef.current.srcObject as MediaStream)
+      if (videoRef.current?.srcObject) {
+        ;(videoRef.current.srcObject as MediaStream)
           .getTracks()
           .forEach((t) => t.stop())
-      // Don't close poseRef — it's shared via the module-level cache.
-      // Closing it would break subsequent uses in the same session.
+        videoRef.current.srcObject = null
+      }
       poseRef.current = null
     }
-  }, [active, targetReps, drawSkeleton, videoRef, canvasRef, innerRef])
+  }, [
+    active,
+    targetReps,
+    preferEnvironment,
+    drawSkeleton,
+    videoRef,
+    canvasRef,
+    innerRef,
+  ])
 
   return { squat, postureScore, error, stage, isRearCamera }
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef } from 'react'
+import { memo, useRef } from 'react'
 import { usePoseDetection } from '@/hooks/usePoseDetection'
 import { postureColor, postureLabel } from '@/lib/poseUtils'
 
@@ -9,13 +9,16 @@ interface Props {
   targetReps: number
   onComplete: () => void
   onPostureScore?: (score: number) => void
+  /** Use rear (environment) camera for wider field-of-view */
+  preferEnvironment?: boolean
 }
 
-export default function CameraView({
+const CameraView = memo(function CameraView({
   active,
   targetReps,
   onComplete,
   onPostureScore,
+  preferEnvironment = false,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -29,6 +32,7 @@ export default function CameraView({
     targetReps,
     onComplete,
     onPostureScore,
+    preferEnvironment,
   })
 
   const isPostureMode = targetReps === 0
@@ -43,7 +47,8 @@ export default function CameraView({
     <div className="camera-wrap">
       {error ? (
         <div className="camera-error">
-          <p>🚫 {error}</p>
+          <p style={{ fontSize: 32 }}>🚫</p>
+          <p>{error}</p>
           <p className="hint">Grant camera access and refresh.</p>
         </div>
       ) : (
@@ -54,6 +59,7 @@ export default function CameraView({
               className={`camera-feed${isRearCamera ? ' rear-camera' : ''}`}
               playsInline
               muted
+              autoPlay
             />
             <canvas
               ref={canvasRef}
@@ -66,7 +72,7 @@ export default function CameraView({
               <div className="camera-spinner" />
               <p>
                 {stage === 'loading-model' && 'Loading pose model…'}
-                {stage === 'requesting-camera' && 'Requesting camera access…'}
+                {stage === 'requesting-camera' && 'Starting camera…'}
               </p>
             </div>
           )}
@@ -89,9 +95,7 @@ export default function CameraView({
                 </div>
               )}
               {!isPostureMode && squat.mode === 'vertical' && (
-                <div className="camera-tip">
-                  Tracking via body movement — legs not in frame
-                </div>
+                <div className="camera-tip">Tracking via body movement</div>
               )}
             </>
           )}
@@ -99,4 +103,6 @@ export default function CameraView({
       )}
     </div>
   )
-}
+})
+
+export default CameraView

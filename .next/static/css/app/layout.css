@@ -22,6 +22,8 @@
   --radius-md: 20px;
   --radius-lg: 28px;
   --ease: cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Touch-safe sizing */
+  --touch-min: 44px;
 }
 
 *,
@@ -30,6 +32,8 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  /* Prevent text size adjustment on orientation change */
+  -webkit-text-size-adjust: 100%;
 }
 
 html,
@@ -40,26 +44,31 @@ body {
   font-size: 16px;
   line-height: 1.6;
   min-height: 100vh;
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
+  /* Prevent horizontal scroll on mobile */
+  overflow-x: hidden;
+  overscroll-behavior: none;
 }
 
 /* ─── Layout ─────────────────────────────────────────────────────────── */
 .page {
   max-width: 480px;
   margin: 0 auto;
-  padding: 0 20px 100px;
+  padding: 0 clamp(14px, 4vw, 20px) 100px;
 }
 
 .page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 28px 0 20px;
+  padding: clamp(18px, 5vw, 28px) 0 clamp(14px, 4vw, 20px);
+  min-height: var(--touch-min);
 }
 
 .page-title {
   font-family: 'Fredoka', sans-serif;
-  font-size: 22px;
+  font-size: clamp(18px, 5vw, 22px);
   font-weight: 600;
   color: var(--text-1);
 }
@@ -67,21 +76,22 @@ body {
 /* ─── Clock ──────────────────────────────────────────────────────────── */
 .clock-display {
   text-align: center;
-  padding: 36px 0 36px;
+  padding: clamp(24px, 7vw, 36px) 0;
 }
 
 .clock-time {
   font-family: 'Fredoka', sans-serif;
-  font-size: clamp(54px, 16vw, 82px);
+  font-size: clamp(52px, 18vw, 82px);
   font-weight: 600;
   letter-spacing: -1px;
   color: var(--text-1);
   line-height: 1;
+  will-change: contents;
 }
 
 .clock-date {
   margin-top: 10px;
-  font-size: 14px;
+  font-size: clamp(12px, 3.5vw, 14px);
   font-weight: 600;
   color: var(--text-2);
   letter-spacing: 0.03em;
@@ -97,15 +107,19 @@ body {
   color: #2c1a00;
   font-family: 'Fredoka', sans-serif;
   font-weight: 600;
-  font-size: 16px;
-  padding: 14px 28px;
+  font-size: clamp(15px, 4vw, 16px);
+  padding: 14px clamp(20px, 5vw, 28px);
   border-radius: var(--radius-lg);
   border: none;
   cursor: pointer;
   text-decoration: none;
+  min-height: var(--touch-min);
   transition:
     transform 0.2s var(--ease),
     opacity 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  will-change: transform;
 }
 .btn-primary:hover {
   transform: scale(1.04);
@@ -122,13 +136,21 @@ body {
   background: var(--bg-card);
   border: none;
   cursor: pointer;
-  font-size: 17px;
-  padding: 8px 10px;
+  font-size: clamp(16px, 4vw, 17px);
+  /* Ensure touch target is at least 44×44 */
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: var(--radius-sm);
   transition:
     transform 0.15s var(--ease),
     background 0.15s;
   text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  will-change: transform;
 }
 .icon-btn:hover {
   background: var(--bg-card2);
@@ -141,14 +163,14 @@ body {
 /* ─── FAB ────────────────────────────────────────────────────────────── */
 .fab {
   position: fixed;
-  bottom: 32px;
-  right: 24px;
-  width: 64px;
-  height: 64px;
+  bottom: clamp(24px, 6vw, 32px);
+  right: clamp(16px, 5vw, 24px);
+  width: clamp(56px, 15vw, 64px);
+  height: clamp(56px, 15vw, 64px);
   border-radius: 50%;
   background: var(--accent);
   color: #2c1a00;
-  font-size: 30px;
+  font-size: clamp(26px, 7vw, 30px);
   font-weight: 600;
   border: none;
   cursor: pointer;
@@ -160,14 +182,23 @@ body {
     transform 0.2s var(--ease),
     box-shadow 0.2s;
   text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  will-change: transform;
+  /* Keep above keyboard / nav bars */
+  z-index: 50;
 }
 .fab:hover {
   transform: scale(1.1) rotate(8deg);
   box-shadow: 0 8px 30px rgba(255, 180, 84, 0.5);
 }
+.fab:active {
+  transform: scale(0.95);
+}
 
 /* ─── Toggle switch ──────────────────────────────────────────────────── */
 .toggle {
+  /* Actual knob dimensions */
   width: 50px;
   height: 28px;
   border-radius: 28px;
@@ -176,6 +207,12 @@ body {
   position: relative;
   transition: background 0.25s var(--ease);
   flex-shrink: 0;
+  /* Expand touch target with transparent padding */
+  padding: 8px 0;
+  margin: -8px 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  will-change: background;
 }
 .toggle.on {
   background: var(--mint);
@@ -193,6 +230,7 @@ body {
   background: #fff;
   transition: transform 0.25s var(--ease);
   pointer-events: none;
+  will-change: transform;
 }
 .toggle.on .toggle__thumb {
   transform: translateX(22px);
@@ -203,7 +241,7 @@ body {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: clamp(10px, 3vw, 14px);
   padding: 4px 0;
 }
 
@@ -211,14 +249,15 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
+  gap: clamp(10px, 3vw, 16px);
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 18px;
+  padding: clamp(14px, 4vw, 18px);
   transition:
     opacity 0.2s,
     transform 0.15s var(--ease);
+  will-change: transform;
 }
 .alarm-card:hover {
   transform: translateY(-1px);
@@ -231,17 +270,18 @@ body {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
 }
 
 .alarm-card__time {
   font-family: 'Fredoka', sans-serif;
-  font-size: 32px;
+  font-size: clamp(28px, 8vw, 34px);
   font-weight: 600;
   line-height: 1.1;
   position: relative;
 }
 .alarm-card__period {
-  font-size: 12px;
+  font-size: 11px;
   font-family: 'Nunito', sans-serif;
   font-weight: 700;
   color: var(--text-2);
@@ -250,13 +290,17 @@ body {
   margin-top: 4px;
 }
 .alarm-card__label {
-  font-size: 13px;
+  font-size: clamp(12px, 3vw, 13px);
   font-weight: 600;
   color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .alarm-card__meta {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
   align-items: center;
   margin-top: 4px;
 }
@@ -266,12 +310,12 @@ body {
   color: var(--accent);
 }
 .alarm-card__repeat {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   color: var(--text-3);
   background: var(--bg-card2);
   border-radius: 8px;
-  padding: 3px 8px;
+  padding: 2px 7px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -279,13 +323,13 @@ body {
 .alarm-card__right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: clamp(4px, 2vw, 8px);
   flex-shrink: 0;
 }
 
 .alarm-empty {
   text-align: center;
-  padding: 60px 0;
+  padding: clamp(40px, 10vw, 60px) 0;
   color: var(--text-2);
   display: flex;
   flex-direction: column;
@@ -294,11 +338,19 @@ body {
   font-weight: 600;
 }
 
+/* ─── Form hint ──────────────────────────────────────────────────────── */
+.form-hint {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
 /* ─── Alarm Form ─────────────────────────────────────────────────────── */
 .alarm-form {
   display: flex;
   flex-direction: column;
-  gap: 30px;
+  gap: clamp(22px, 6vw, 30px);
   padding: 8px 0 40px;
 }
 .form-group {
@@ -307,7 +359,7 @@ body {
   gap: 10px;
 }
 .form-group label {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--text-2);
   text-transform: uppercase;
@@ -319,11 +371,13 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-1);
-  padding: 13px 16px;
-  font-size: 15px;
+  padding: clamp(12px, 3vw, 13px) 16px;
+  font-size: clamp(14px, 4vw, 15px);
+  min-height: var(--touch-min);
   outline: none;
   font-family: inherit;
   transition: border-color 0.15s;
+  width: 100%;
 }
 .form-group input:focus {
   border-color: var(--accent);
@@ -331,7 +385,7 @@ body {
 
 .time-input {
   font-family: 'Fredoka', sans-serif !important;
-  font-size: 38px !important;
+  font-size: clamp(30px, 9vw, 38px) !important;
   padding: 16px !important;
   text-align: center;
   color-scheme: dark;
@@ -341,24 +395,34 @@ input[type='range'] {
   accent-color: var(--accent);
   width: 100%;
   cursor: pointer;
+  min-height: var(--touch-min);
+  /* Stretch the track to full width */
+  display: block;
 }
 
 /* ─── Chips ──────────────────────────────────────────────────────────── */
 .chip-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: clamp(6px, 2vw, 8px);
 }
 .chip {
-  padding: 8px 16px;
+  padding: clamp(10px, 2.5vw, 11px) clamp(14px, 4vw, 16px);
   border-radius: 100px;
   border: 1px solid var(--border);
   background: var(--bg-card);
   color: var(--text-2);
-  font-size: 13px;
+  font-size: clamp(12px, 3.5vw, 13px);
   font-weight: 600;
   cursor: pointer;
+  /* Enforce minimum touch target */
+  min-height: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: all 0.15s var(--ease);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 .chip:hover {
   transform: scale(1.04);
@@ -369,28 +433,37 @@ input[type='range'] {
   color: var(--accent);
 }
 .day-chip {
-  padding: 8px 12px;
-  font-size: 12px;
+  padding: clamp(8px, 2vw, 10px) clamp(10px, 2.5vw, 12px);
+  font-size: 11px;
 }
 
 /* ─── Task cards ─────────────────────────────────────────────────────── */
 .task-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: clamp(8px, 2.5vw, 10px);
+}
+@media (min-width: 380px) {
+  .task-row {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
 .task-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 18px 8px;
+  gap: 5px;
+  padding: clamp(14px, 4vw, 18px) 8px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--bg-card);
   cursor: pointer;
+  min-height: var(--touch-min);
   transition: all 0.15s var(--ease);
   text-align: center;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  will-change: transform;
 }
 .task-card:hover {
   transform: translateY(-2px);
@@ -400,21 +473,22 @@ input[type='range'] {
   background: var(--accent-dim);
 }
 .task-icon {
-  font-size: 28px;
+  font-size: clamp(22px, 6vw, 28px);
 }
 .task-label {
-  font-size: 13px;
+  font-size: clamp(11px, 3vw, 13px);
   font-weight: 700;
   color: var(--text-1);
 }
 .task-desc {
-  font-size: 11px;
+  font-size: clamp(10px, 2.5vw, 11px);
   color: var(--text-3);
 }
 
 /* ─── Ringing page ───────────────────────────────────────────────────── */
 .ringing-page {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -426,6 +500,7 @@ input[type='range'] {
 
 .ringing-loading {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -440,6 +515,7 @@ input[type='range'] {
   border: 4px solid var(--border);
   border-top-color: var(--accent);
   animation: cam-spin 0.7s linear infinite;
+  will-change: transform;
 }
 
 /* ─── Pulse backdrop ─────────────────────────────────────────────────── */
@@ -457,20 +533,21 @@ input[type='range'] {
   border-radius: 50%;
   border: 2px solid rgba(255, 180, 84, 0.3);
   animation: ripple 3s ease-out infinite;
+  will-change: transform, opacity;
 }
 .pulse-1 {
-  width: 200px;
-  height: 200px;
+  width: 180px;
+  height: 180px;
   animation-delay: 0s;
 }
 .pulse-2 {
-  width: 360px;
-  height: 360px;
+  width: 330px;
+  height: 330px;
   animation-delay: 0.9s;
 }
 .pulse-3 {
-  width: 520px;
-  height: 520px;
+  width: 480px;
+  height: 480px;
   animation-delay: 1.8s;
 }
 
@@ -492,8 +569,8 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 70px 24px 32px;
+  gap: clamp(8px, 2.5vw, 10px);
+  padding: clamp(50px, 13vw, 70px) clamp(16px, 5vw, 24px) 32px;
   text-align: center;
   width: 100%;
   max-width: 480px;
@@ -509,12 +586,13 @@ input[type='range'] {
   }
 }
 .ringing-mascot {
-  font-size: 60px;
+  font-size: clamp(50px, 14vw, 60px);
   animation: bounce-mascot 1.1s ease-in-out infinite;
+  will-change: transform;
 }
 
 .ringing-label {
-  font-size: 14px;
+  font-size: clamp(12px, 3.5vw, 14px);
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -523,38 +601,48 @@ input[type='range'] {
 
 .ringing-time {
   font-family: 'Fredoka', sans-serif;
-  font-size: clamp(58px, 18vw, 92px);
+  font-size: clamp(52px, 18vw, 92px);
   font-weight: 600;
   letter-spacing: -2px;
   line-height: 1;
+  will-change: contents;
 }
 
 .ringing-tap-hint {
   color: var(--accent);
-  font-size: 13px;
+  font-size: clamp(12px, 3.5vw, 13px);
   font-weight: 600;
   margin-top: 4px;
 }
 
 .ringing-actions {
   display: flex;
-  gap: 12px;
-  margin-top: 26px;
+  gap: clamp(8px, 3vw, 12px);
+  margin-top: clamp(18px, 5vw, 26px);
+  width: 100%;
+  justify-content: center;
 }
 
 .btn-snooze {
-  padding: 14px 26px;
+  padding: clamp(12px, 3vw, 14px) clamp(18px, 5vw, 26px);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--bg-card);
   color: var(--text-1);
   font-family: 'Fredoka', sans-serif;
-  font-size: 15px;
+  font-size: clamp(14px, 4vw, 15px);
   font-weight: 600;
   cursor: pointer;
+  min-height: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition:
     transform 0.15s var(--ease),
     background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  will-change: transform;
 }
 .btn-snooze:hover {
   transform: scale(1.04);
@@ -566,16 +654,23 @@ input[type='range'] {
 }
 
 .btn-start-task {
-  padding: 14px 30px;
+  padding: clamp(12px, 3vw, 14px) clamp(22px, 6vw, 30px);
   border-radius: var(--radius-lg);
   border: none;
   background: var(--accent);
   color: #2c1a00;
   font-family: 'Fredoka', sans-serif;
-  font-size: 15px;
+  font-size: clamp(14px, 4vw, 15px);
   font-weight: 600;
   cursor: pointer;
+  min-height: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: transform 0.15s var(--ease);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  will-change: transform;
 }
 .btn-start-task:hover {
   transform: scale(1.05);
@@ -588,53 +683,49 @@ input[type='range'] {
 .activity-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(21, 16, 31, 0.98);
+  background: #000;
   z-index: 100;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 4px 4px 0;
   overflow: hidden;
+  /* Account for safe area on phones with notches */
+  padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 .activity-header {
   flex-shrink: 0;
   text-align: center;
-  width: 100%;
-  padding: 2px 0 2px;
+  padding: clamp(8px, 2vw, 10px) clamp(10px, 3vw, 12px) clamp(5px, 1.5vw, 6px);
+  background: var(--bg);
+  z-index: 10;
 }
 .activity-header h2 {
   font-family: 'Fredoka', sans-serif;
-  font-size: 15px;
+  font-size: clamp(14px, 4vw, 16px);
   font-weight: 600;
+  color: var(--text-1);
   line-height: 1.2;
 }
 .activity-sub {
   color: var(--text-2);
-  font-size: 10px;
+  font-size: clamp(10px, 3vw, 11px);
   font-weight: 600;
-  margin-top: 1px;
+  margin-top: 2px;
 }
 .activity-hint {
   color: var(--text-3);
-  font-size: 9px;
+  font-size: clamp(9px, 2.5vw, 10px);
   margin-top: 1px;
 }
 
-/* ─── Camera ─────────────────────────────────────────────────────────── */
+/* ─── Camera wrap fills ALL remaining space ──────────────────────────── */
 .camera-wrap {
-  /* Take every remaining pixel after the tiny header */
   flex: 1 1 0;
   min-height: 0;
   width: 100%;
-  /* No border-radius on sides so it bleeds edge-to-edge */
-  border-radius: 10px 10px 0 0;
-  overflow: hidden;
-  background: #000;
   position: relative;
-  /* Safety floor so it never collapses */
-  min-height: 60vh;
+  background: #000;
+  overflow: hidden;
 }
 
 .camera-inner {
@@ -645,22 +736,14 @@ input[type='range'] {
 }
 
 .camera-feed {
-  position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
-  /*
-   * cover fills the box — no black bars.
-   * Because we're requesting a very wide FOV (zoom 0.3-0.4x),
-   * the full body is captured in the source; cover just
-   * stretches it to fill the tall phone screen.
-   * If zoom fails and the source is still narrow, contain
-   * is safer — but cover looks much better when FOV is wide.
-   */
-  -o-object-fit: cover;
-     object-fit: cover;
+  -o-object-fit: contain;
+     object-fit: contain;
   background: #000;
-  transform: scaleX(-1); /* mirror front cam */
+  display: block;
+  transform: scaleX(-1);
+  will-change: transform;
 }
 .camera-feed.rear-camera {
   transform: scaleX(1);
@@ -671,9 +754,11 @@ input[type='range'] {
   inset: 0;
   width: 100%;
   height: 100%;
-  -o-object-fit: cover;
-     object-fit: cover;
+  -o-object-fit: contain;
+     object-fit: contain;
   transform: scaleX(-1);
+  pointer-events: none;
+  will-change: transform;
 }
 .camera-canvas.rear-camera {
   transform: scaleX(1);
@@ -681,31 +766,52 @@ input[type='range'] {
 
 .camera-badge {
   position: absolute;
-  bottom: 12px;
+  bottom: clamp(10px, 3vw, 14px);
   left: 50%;
   transform: translateX(-50%);
   background: rgba(21, 16, 31, 0.88);
   color: var(--accent);
   font-family: 'Fredoka', sans-serif;
-  font-size: 15px;
+  font-size: clamp(14px, 4vw, 16px);
   font-weight: 600;
-  padding: 7px 18px;
+  padding: clamp(6px, 2vw, 8px) clamp(16px, 5vw, 22px);
   border-radius: 100px;
   border: 1px solid var(--accent-dim);
   white-space: nowrap;
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 2;
+  will-change: transform;
+}
+
+.camera-tip {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(21, 16, 31, 0.85);
+  color: var(--text-2);
+  font-size: clamp(10px, 2.5vw, 11px);
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 100px;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 2;
 }
 
 .camera-error {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
   gap: 8px;
   padding: 24px;
   text-align: center;
+  color: var(--text-1);
 }
 .camera-error .hint {
   font-size: 13px;
@@ -720,21 +826,22 @@ input[type='range'] {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: rgba(21, 16, 31, 0.92);
+  background: rgba(21, 16, 31, 0.95);
   color: var(--text-1);
-  font-size: 14px;
+  font-size: clamp(13px, 3.5vw, 14px);
   font-weight: 600;
   text-align: center;
   padding: 24px;
-  z-index: 2;
+  z-index: 5;
 }
 .camera-spinner {
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   border: 3px solid var(--border);
   border-top-color: var(--accent);
   animation: cam-spin 0.8s linear infinite;
+  will-change: transform;
 }
 @keyframes cam-spin {
   to {
@@ -742,29 +849,14 @@ input[type='range'] {
   }
 }
 
-.camera-tip {
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(21, 16, 31, 0.85);
-  color: var(--text-2);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 100px;
-  white-space: nowrap;
-  backdrop-filter: blur(8px);
-  z-index: 2;
-}
-
-/* ─── Posture panel (inside activity overlay) ────────────────────────── */
+/* ─── Posture panel below camera ─────────────────────────────────────── */
 .posture-panel {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 6px 0 2px;
+  gap: clamp(12px, 4vw, 16px);
+  padding: clamp(8px, 2.5vw, 10px) clamp(14px, 4vw, 20px);
+  background: var(--bg);
 }
 .posture-score-wrap {
   display: flex;
@@ -773,7 +865,7 @@ input[type='range'] {
   gap: 4px;
 }
 .posture-label {
-  font-size: 12px;
+  font-size: clamp(10px, 3vw, 12px);
   font-weight: 700;
 }
 .posture-hold {
@@ -787,15 +879,15 @@ input[type='range'] {
   background: rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   overflow: hidden;
-  width: 160px;
 }
 .posture-hold-fill {
   height: 100%;
   border-radius: 8px;
   transition: width 0.25s ease;
+  will-change: width;
 }
 .posture-hold-text {
-  font-size: 12px;
+  font-size: clamp(11px, 3vw, 12px);
   font-weight: 600;
   color: var(--text-2);
 }
@@ -809,16 +901,17 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
-  padding: 32px;
+  gap: clamp(16px, 5vw, 20px);
+  padding: clamp(24px, 7vw, 32px);
   background: var(--bg-card);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   width: min(100%, 340px);
+  margin: auto;
 }
 .math-question {
   font-family: 'Fredoka', sans-serif;
-  font-size: 38px;
+  font-size: clamp(32px, 9vw, 38px);
   font-weight: 600;
 }
 .math-input {
@@ -827,17 +920,17 @@ input[type='range'] {
   border-radius: var(--radius-sm);
   color: var(--text-1);
   font-family: 'Fredoka', sans-serif;
-  font-size: 28px;
+  font-size: clamp(24px, 7vw, 28px);
   padding: 12px 16px;
   text-align: center;
-  width: 160px;
+  width: clamp(130px, 45vw, 160px);
+  min-height: var(--touch-min);
   outline: none;
   transition: border-color 0.15s;
 }
 .math-input:focus {
   border-color: var(--accent);
 }
-
 @keyframes shake-err {
   0%,
   100% {
@@ -867,11 +960,13 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 16px;
+  flex: 1;
 }
 .shake-hint {
   color: var(--text-2);
-  font-size: 14px;
+  font-size: clamp(13px, 4vw, 14px);
   font-weight: 600;
 }
 
@@ -880,17 +975,31 @@ input[type='range'] {
   background: none;
   border: none;
   color: var(--text-2);
-  font-size: 14px;
+  font-size: clamp(13px, 4vw, 14px);
   font-weight: 700;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 0;
+  padding: clamp(10px, 2.5vw, 12px) 0;
+  min-height: var(--touch-min);
   text-decoration: none;
   transition: color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 .back-btn:hover {
   color: var(--text-1);
+}
+
+/* ─── Reduced motion ─────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
